@@ -56,7 +56,13 @@ void add(int* vectorA, int* vectorB, int* vectorC, int size)
 // Kernel function to add the elements of two arrays
 __global__ void cudaAdd(int* vectorA, int* vectorB, int* vectorC, int size)
 {
-    //ToDo: implement kernel 
+    int globThreadId = blockIdx.x * blockDim.x + threadIdx.x;
+    if(globThreadId < size) {
+        vectorC[globThreadId] = vectorA[globThreadId] + vectorB[globThreadId];
+    }
+    else{
+        printf("Overshooted");
+    }
 }
 
 
@@ -111,11 +117,15 @@ int main(void)
     // Run the vector kernel on the CPU
     add(hostVectorA, hostVectorB, hostVectorCCPU, N);
 
+    int configs[5][2] = {{1024,1024},{1024,1024},{2048,512},{4096,256},{8192,128}}; //first is warm-up
+
     // Run kernel on the GPU
     // ToDo: Play with different block/thread sizes - do you see significant differences?
     //       1048576 Threads are needed to have 1 Thread per addition
-    cudaAdd << <ToDo, ToDo >> > (deviceVectorA, deviceVectorB, deviceVectorC, N);// Kernel execution is async and will not return an error:
-    gpuErrCheck(cudaPeekAtLastError());
+    for(int i = 0; i < 5;i++) {
+        cudaAdd << <configs[i][0], configs[i][1] >> > (deviceVectorA, deviceVectorB, deviceVectorC, N);// Kernel execution is async and will not return an error:
+        gpuErrCheck(cudaPeekAtLastError());
+    }
 
     // Copy the result stored in deviceVectorC back to host (hostVectorCGPU)
     gpuErrCheck(cudaMemcpy(hostVectorCGPU, deviceVectorC, N * sizeof(int), cudaMemcpyDeviceToHost));
