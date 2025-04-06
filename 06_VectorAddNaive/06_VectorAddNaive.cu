@@ -105,10 +105,16 @@ int main(void)
     }
 
     // Alloc N times size of int at device memory for deviceVector[A-C]
-    // ToDo
+    int* deviceVectorA;
+    int* deviceVectorB;
+    int* deviceVectorC;
+    cudaMalloc(&deviceVectorA, N * sizeof(int));
+    cudaMalloc(&deviceVectorB, N * sizeof(int));
+    cudaMalloc(&deviceVectorC, N * sizeof(int));
 
     // Copy data from host to device
-    // ToDo
+    cudaMemcpy(deviceVectorA, hostVectorA,N * sizeof(int),cudaMemcpyHostToDevice);
+    cudaMemcpy(deviceVectorB, hostVectorB,N * sizeof(int),cudaMemcpyHostToDevice);
 
     // Run the vector kernel on the CPU
     add(hostVectorA, hostVectorB, hostVectorCCPU, N);
@@ -121,13 +127,15 @@ int main(void)
     gpuErrCheck(cudaPeekAtLastError());
 
     // Copy the result stored in deviceVectorC back to host (hostVectorCGPU)
-    // ToDo
+    cudaMemcpy(hostVectorCGPU, deviceVectorC,N * sizeof(int),cudaMemcpyDeviceToHost);
 
     // Compare CPU vs GPU result to see if we get the same result
     auto isValid = compareResultVec(hostVectorCCPU, hostVectorCGPU, N);
 
     // Free memory on device
-    // ToDo
+    cudaFree(deviceVectorA);
+    cudaFree(deviceVectorB);
+    cudaFree(deviceVectorC);
 
     // Free memory on host
     delete[] hostVectorA;
