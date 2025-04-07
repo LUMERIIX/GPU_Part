@@ -59,9 +59,56 @@ inline void gpuAssert(cudaError_t code, const char* file, int line, bool abort =
 * memory, as shown in the slides of the lecture.
 *
 */
-__global__ void movingSumSharedMemStatic(int* vec, int* result_vec, int size)
+__global__ void movingSumSharedMemStatic(int* vec, int* result_vec, int size) //size = 10.. so sum includes i-10.....i....i+10
 {
+    //block has 512Threads
+    __shared__ int shm_vec[BLOCKSIZE + 2*RADIUS]; //add 2x radius for the left and right border
+
+    int index = blockIdx.x * blockDim.x + threadIdx.x; //standard line
+    shm_vec[threadIdx.x + RADIUS] = vec[index]; //treat 
+
+    if(blockIdx.x != 0 && blockIdx.x != ( WIDTH / BLOCKSIZE ) -1 ) { // if not a border-block load angrenzende elemente (for block idx 1 to n-1)
+        if(threadIdx.x < 10 ) { // (left) only execute on threads which need edge blocks!
+            for(int i = 0; i < RADIUS; i++) {
+                shm_vec[i] = result_vec[index-RADIUS+i];
+            }
+        }
+        else if(threadIdx.x > BLOCKSIZE-RADIUS) {
+            for(int i = 0; i < RADIUS; i++) {
+                shm_vec[BLOCKSIZE+i] = result_vec[index+RADIUS+i];
+            }
+        }
+    }
+    else if(blockIdx.x == 0) { // if first block load angrenzende elemente (for block idx 1 to n-1)
+        for(int i = 0; i < RADIUS; i++) {
+            shm_vec[i] = 0;
+        }
+    }
+    else if(blockIdx.x == ( WIDTH / BLOCKSIZE ) -1) { // if last block load angrenzende elemente (for block idx 1 to n-1)
+        for(int i = 0; i < RADIUS; i++) {
+            shm_vec[BLOCKSIZE+i] = 0;
+        }
+    }
+    shm_vec[threadIdx.x + RADIUS] = vec[index]; //treat the current element
+    __syncthreads(); //wait for all threads to load their data
+
+    int tmp = 0;
+    for(int i = index-RADIUS; i < index+RADIUS+1; i++) { //sum the elements
+        tmp += shm_vec[i];
+    }
+
+    result_vec[index] = tmp; //write the result
+
+
     //ToDo
+    //1) create shared cudaMemory
+    //2) load data from vec to shm_vec
+    //3)!!!attention broder left and right
+    //int tmp = 0;
+    //for i in readiu;
+    //    tmp += shm_vec[i]
+//
+    //result_vec[i] = tmp
 }
 
 
@@ -75,6 +122,10 @@ __global__ void movingSumSharedMemStatic(int* vec, int* result_vec, int size)
 *    extern __shared__ int shmVec[];
 * and extend the execution configuration with the size of the shmVec.
 *
+<<< n_blocks, n_threads, size shm >>>
+annahme:
+- threads 1024
+- shm muss links und rechts +10 elemente haben 
 */
 __global__ void movingSumSharedMemDynamic(int* vec, int* result_vec, int size)
 {
@@ -211,9 +262,10 @@ int main(void)
 
     // Run kernel on all elements on the GPU
     int nbr_blocks = ((WIDTH % BLOCKSIZE) != 0) ? (WIDTH / BLOCKSIZE + 1) : (WIDTH / BLOCKSIZE);
+    //WIDTH = array-elems
     movingSumGlobal << <nbr_blocks, BLOCKSIZE >> > (deviceVecInput, deviceVecOutput1, WIDTH);
     gpuErrCheck(cudaPeekAtLastError());
-    //ToDo: movingSumSharedMemStatic << <nbr_blocks, BLOCKSIZE >> > (deviceVecInput, deviceVecOutput2, WIDTH);
+    movingSumSharedMemStatic << <nbr_blocks, BLOCKSIZE >> > (deviceVecInput, deviceVecOutput2, WIDTH);
     gpuErrCheck(cudaPeekAtLastError());
     //ToDo: movingSumSharedMemDynamic <<<nbr_blocks, BLOCKSIZE, ?????????? >>> (deviceVecInput, deviceVecOutput3, WIDTH);
     gpuErrCheck(cudaPeekAtLastError());
