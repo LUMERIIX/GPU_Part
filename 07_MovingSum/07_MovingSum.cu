@@ -61,54 +61,42 @@ inline void gpuAssert(cudaError_t code, const char* file, int line, bool abort =
 */
 __global__ void movingSumSharedMemStatic(int* vec, int* result_vec, int size) //size = 10.. so sum includes i-10.....i....i+10
 {
-    //block has 512Threads
-    __shared__ int shm_vec[BLOCKSIZE + 2*RADIUS]; //add 2x radius for the left and right border
+    // Assuming BLOCKSIZE and RADIUS are defined appropriately.
+    __shared__ int shm_vec[BLOCKSIZE + 2 * RADIUS];
 
-    int index = blockIdx.x * blockDim.x + threadIdx.x; //standard line
-    shm_vec[threadIdx.x + RADIUS] = vec[index]; //treat 
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int local_index = threadIdx.x + RADIUS; // Position in shared memory
 
-    if(blockIdx.x != 0 && blockIdx.x != ( WIDTH / BLOCKSIZE ) -1 ) { // if not a border-block load angrenzende elemente (for block idx 1 to n-1)
-        if(threadIdx.x < 10 ) { // (left) only execute on threads which need edge blocks!
-            for(int i = 0; i < RADIUS; i++) {
-                shm_vec[i] = result_vec[index-RADIUS+i];
-            }
-        }
-        else if(threadIdx.x > BLOCKSIZE-RADIUS) {
-            for(int i = 0; i < RADIUS; i++) {
-                shm_vec[BLOCKSIZE+i] = result_vec[index+RADIUS+i];
-            }
-        }
+    // Load the main data element for the current thread
+    if(index < size)
+        shm_vec[local_index] = vec[index];
+    
+    // Load left halo
+    if(threadIdx.x < RADIUS) {
+        int global_index = index - RADIUS;
+        // Check boundary: if global index is out of bounds, use 0 (is the case for blockDim = 0)
+        shm_vec[threadIdx.x] = (global_index >= 0) ? vec[global_index] : 0;
     }
-    else if(blockIdx.x == 0) { // if first block load angrenzende elemente (for block idx 1 to n-1)
-        for(int i = 0; i < RADIUS; i++) {
-            shm_vec[i] = 0;
-        }
+    
+    // Load right halo
+    if(threadIdx.x >= blockDim.x - RADIUS) {
+        int global_index = index + RADIUS;
+        int shm_index = local_index + RADIUS;
+        // Check boundary: if global index is out of bounds, use 0
+        shm_vec[shm_index] = (global_index < size) ? vec[global_index] : 0;
     }
-    else if(blockIdx.x == ( WIDTH / BLOCKSIZE ) -1) { // if last block load angrenzende elemente (for block idx 1 to n-1)
-        for(int i = 0; i < RADIUS; i++) {
-            shm_vec[BLOCKSIZE+i] = 0;
-        }
-    }
-    shm_vec[threadIdx.x + RADIUS] = vec[index]; //treat the current element
-    __syncthreads(); //wait for all threads to load their data
+    
+    __syncthreads(); // Ensure all threads have loaded data into shared memory
 
+    // Compute the moving sum using the shared memory indices
     int tmp = 0;
-    for(int i = index-RADIUS; i < index+RADIUS+1; i++) { //sum the elements
+    for (int i = local_index - RADIUS; i <= local_index + RADIUS; i++) {
         tmp += shm_vec[i];
     }
-
-    result_vec[index] = tmp; //write the result
-
-
-    //ToDo
-    //1) create shared cudaMemory
-    //2) load data from vec to shm_vec
-    //3)!!!attention broder left and right
-    //int tmp = 0;
-    //for i in readiu;
-    //    tmp += shm_vec[i]
-//
-    //result_vec[i] = tmp
+    
+    // Store the result, ensuring we don't write out-of-bounds
+    if(index < size)
+        result_vec[index] = tmp;
 }
 
 
