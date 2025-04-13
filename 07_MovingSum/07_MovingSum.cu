@@ -68,22 +68,26 @@ __global__ void movingSumSharedMemStatic(int* vec, int* result_vec, int size) //
     int local_index = threadIdx.x + RADIUS; // Position in shared memory
 
     // Load the main data element for the current thread
-    if(index < size)
+    if(index < size) {
         shm_vec[local_index] = vec[index];
-    
-    // Load left halo
-    if(threadIdx.x < RADIUS) {
-        int global_index = index - RADIUS;
-        // Check boundary: if global index is out of bounds, use 0 (is the case for blockDim = 0)
-        shm_vec[threadIdx.x] = (global_index >= 0) ? vec[global_index] : 0;
-    }
-    
-    // Load right halo
-    if(threadIdx.x >= blockDim.x - RADIUS) {
-        int global_index = index + RADIUS;
-        int shm_index = local_index + RADIUS;
-        // Check boundary: if global index is out of bounds, use 0
-        shm_vec[shm_index] = (global_index < size) ? vec[global_index] : 0;
+
+        if(threadIdx.x < RADIUS) { //use the n-threads (RADIUIS ones) to handle left and right borders
+            // left halo handling
+            if( index < RADIUS ) { // thread all to the left (there are no left neighbours)
+                shm_vec[threadIdx.x] = 0;
+            }
+            else {
+                shm_vec[threadIdx.x] = vec[index - RADIUS];
+            }
+
+            //right halo handling
+            if (index + BLOCKSIZE >= size) { //if last block there are no neighbours
+                shm_vec[BLOCKSIZE + local_index] = 0;
+            }
+            else {
+                shm_vec[BLOCKSIZE + local_index] = vec[index + BLOCKSIZE];
+            }
+        }
     }
     
     __syncthreads(); // Ensure all threads have loaded data into shared memory
@@ -115,9 +119,51 @@ annahme:
 - threads 1024
 - shm muss links und rechts +10 elemente haben 
 */
+/**
+ * Threads that belong to a thread block cluster, can read, write or perform atomics in the distributed address space, regardless whether the address belongs to the local thread block or a remote thread block. 
+ * Whether a kernel uses distributed shared memory or not, the shared memory size specifications, static or dynamic is still per thread block. The size of distributed shared memory is just the number of thread blocks per cluster multiplied by the size of shared memory per thread block. 
+ **/
 __global__ void movingSumSharedMemDynamic(int* vec, int* result_vec, int size)
 {
-    //ToDo
+    extern __shared__ int shm_vec[];
+
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int local_index = threadIdx.x + RADIUS; // Position in shared memory
+
+    // Load the main data element for the current thread
+    if(index < size) {
+        shm_vec[local_index] = vec[index];
+
+        if(threadIdx.x < RADIUS) { //use the n-threads (RADIUIS ones) to handle left and right borders
+            // left halo handling
+            if( index < RADIUS ) { // thread all to the left (there are no left neighbours)
+                shm_vec[threadIdx.x] = 0;
+            }
+            else {
+                shm_vec[threadIdx.x] = vec[index - RADIUS];
+            }
+
+            //right halo handling
+            if (index + BLOCKSIZE >= size) { //if last block there are no neighbours
+                shm_vec[BLOCKSIZE + local_index] = 0;
+            }
+            else {
+                shm_vec[BLOCKSIZE + local_index] = vec[index + BLOCKSIZE];
+            }
+        }
+    }
+    
+    __syncthreads(); // Ensure all threads have loaded data into shared memory
+
+    // Compute the moving sum using the shared memory indices
+    int tmp = 0;
+    for (int i = local_index - RADIUS; i <= local_index + RADIUS; i++) {
+        tmp += shm_vec[i];
+    }
+    
+    // Store the result, ensuring we don't write out-of-bounds
+    if(index < size)
+        result_vec[index] = tmp;
 }
 
 
@@ -132,7 +178,13 @@ __global__ void movingSumSharedMemDynamic(int* vec, int* result_vec, int size)
 */
 __global__ void movingSumAtomics(int* vec, int* result_vec, int size)
 {
-    //ToDo
+    int globalIdx = threadIdx.x + blockIdx.x * blockDim.x;
+    for(int offset = -RADIUS; offset <= RADIUS; offset++) { //a thread writes to all its neighbours his additional value
+        int internalIdx = globalIdx + offset;
+        if (internalIdx >= 0 && internalIdx < size) {
+            atomicAdd(result_vec + internalIdx, vec[globalIdx]);
+        }
+    }
 }
 
 
@@ -255,9 +307,11 @@ int main(void)
     gpuErrCheck(cudaPeekAtLastError());
     movingSumSharedMemStatic << <nbr_blocks, BLOCKSIZE >> > (deviceVecInput, deviceVecOutput2, WIDTH);
     gpuErrCheck(cudaPeekAtLastError());
-    //ToDo: movingSumSharedMemDynamic <<<nbr_blocks, BLOCKSIZE, ?????????? >>> (deviceVecInput, deviceVecOutput3, WIDTH);
+    //configuration how much shared memory is needed is passed in the kernel call << nbr_blocks, BLOCKSIZE, size shmVec >
+    size_t shmSize = (BLOCKSIZE + 2 * RADIUS) * sizeof(int);
+    movingSumSharedMemDynamic <<<nbr_blocks, BLOCKSIZE, shmSize >>> (deviceVecInput, deviceVecOutput3, WIDTH);
     gpuErrCheck(cudaPeekAtLastError());
-    //ToDo: movingSumAtomics << <nbr_blocks, BLOCKSIZE >> > (deviceVecInput, deviceVecOutput4, WIDTH);
+    movingSumAtomics << <nbr_blocks, BLOCKSIZE >> > (deviceVecInput, deviceVecOutput4, WIDTH);
     gpuErrCheck(cudaPeekAtLastError());
 
     // Copy the result stored in device_y back to host_y
