@@ -73,6 +73,7 @@ int main(void)
     const int numStreams = 8;
     cudaStream_t streams[numStreams];
 
+    #pragma omp parallel for
     for (int i = 0; i < numStreams; i++) {
         gpuErrCheck(cudaStreamCreate(&streams[i]));
         int dataOffset = i * (N / numStreams);
