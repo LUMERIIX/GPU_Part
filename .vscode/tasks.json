@@ -83,7 +83,7 @@
                 "-I../Common",
                 "-O3",
                 "--generate-line-info",
-                //"--default-stream","per-thread",
+                "--default-stream","per-thread",
                 "-Xcompiler","-fopenmp",
                 "-o",
                 "bin/${fileBasenameNoExtension}_optimized"
